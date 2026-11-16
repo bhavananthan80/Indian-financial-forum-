@@ -4,6 +4,8 @@ import { ArrowRight, ShieldCheck, Upload, CheckCircle2, Users, Landmark, Network
 import { Button } from '@/components/ui/button';
 import { photos } from '@/lib/photos';
 import { maxResumeBytes, topics } from '@/lib/submissions';
+import { eventCategories, type SiteEvent, type SitePerson } from '@/lib/cms';
+import { useCms, usePagePhoto } from '@/lib/cms-context';
 
 export { photos };
 export type Destination = '/' | '/about' | '/professionals' | '/organisations' | '/events' | '/knowledge-hub' | '/job-seekers' | '/contact' | '/speaking';
@@ -34,10 +36,11 @@ export function Hero({
   action?: string; to?: Destination; topic?: typeof topics[number] | undefined; stats?: [string, string][];
   children?: ReactNode; dark?: boolean;
 }) {
-  const cover = dark && image;
+  const photo = usePagePhoto('hero', image, caption);
+  const cover = dark && photo.src;
   return (
-    <section className={`page-hero ${dark ? 'hero-dark' : ''} ${image ? 'has-image' : ''} ${cover ? 'hero-cover' : ''}`}>
-      {cover && <img className="hero-cover-image" src={image} alt={caption ?? ''} fetchPriority="high" />}
+    <section className={`page-hero ${dark ? 'hero-dark' : ''} ${photo.src ? 'has-image' : ''} ${cover ? 'hero-cover' : ''}`}>
+      {cover && <img className="hero-cover-image" src={photo.src} alt={photo.alt} fetchPriority="high" />}
       <div className="container hero-grid">
         <div className="hero-copy">
           <Eyebrow>{eyebrow}</Eyebrow>
@@ -49,8 +52,8 @@ export function Hero({
           </div>}
           {stats && <Stats items={stats} compact />}
         </div>
-        {image && !cover && <figure className="hero-photo">
-          <img src={image} alt={caption ?? ''} fetchPriority="high" />
+        {photo.src && !cover && <figure className="hero-photo">
+          <img src={photo.src} alt={photo.alt} fetchPriority="high" />
         </figure>}
       </div>
     </section>
@@ -90,7 +93,11 @@ export function Stats({ items, compact = false, animated = false }: { items: [st
 }
 const icons = [Landmark, Users, Network, TrendingUp, Briefcase, ShieldCheck, BookOpen, Globe, Sparkles, Mic];
 export function FeatureGrid({ items, columns = 3 }: { items: { title: string; text: string; link?: string; to?: Destination; icon?: ComponentType<{ size?: number }> }[]; columns?: number }) { return <div className={`feature-grid columns-${columns}`}>{items.map((item, i) => { const Icon = item.icon || icons[i % icons.length] || Landmark; return <article className="feature-card" key={item.title}><div className={`feature-icon tone-${i % 4}`}><Icon size={22} /></div><h3>{item.title}</h3><p>{item.text}</p>{item.link && <Link className="text-link" to={item.to || '/contact'}>{item.link}<ArrowRight size={16} /></Link>}</article>; })}</div>; }
-export function Partners() { return <div className="partners">{['SBI', 'HDFC BANK', 'ICICI BANK', 'AXIS BANK', 'Kotak', 'BAJAJ FINSERV', 'Adani'].map(name => <span key={name}>{name}</span>)}</div>; }
+export function Partners() {
+  const { branding } = useCms();
+  const names = [...new Set(branding.partners.split('\n').map(name => name.trim()).filter(Boolean))];
+  return <div className="partners">{names.map(name => <span key={name}>{name}</span>)}</div>;
+}
 export function Callout({
   title = 'Ready to be part of what’s next?',
   text = 'Join India’s financial community to connect, collaborate and create meaningful impact.',
@@ -99,11 +106,12 @@ export function Callout({
   title?: string; text?: string; action?: string; to?: Destination;
   image?: string; topic?: typeof topics[number] | undefined;
 }) {
+  const photo = usePagePhoto('footer', image);
   return (
     <section className="section closing-section">
       <div className="container">
         <div className="callout">
-          <img className="callout-image" src={image} alt="" loading="lazy" />
+          <img className="callout-image" src={photo.src} alt={photo.alt} loading="lazy" />
           <div className="callout-copy">
             <h2>{title}</h2><p>{text}</p>
             <Action to={to} topic={topic ?? (action === 'Become a Member' ? 'Membership' : undefined)}>{action}</Action>
@@ -208,30 +216,40 @@ export function ApplicationForm({ kind = 'contact', topic }: {
     </form>
   );
 }
-const eventList = [
-  { title: 'IFF Risk & Compliance Roundtable', category: 'Roundtables', text: 'Managing systemic liquidity pressures, cyber exposure and evolving regulation.' },
-  { title: 'Digital Lending & FLDG Masterclass', category: 'Webinars', text: 'Decoding credit, digital lending guidelines and responsible innovation.' },
-  { title: 'Women in BFSI Leadership Assembly', category: 'Networking', text: 'Connecting leaders and celebrating the perspectives shaping finance.' },
-  { title: 'Treasury & Liquidity Management', category: 'Roundtables', text: 'Fresh perspectives on liquidity strategy and financial resilience.' },
-] as const;
+export function EventLink({ event }: { event: SiteEvent }) {
+  if (event.registration) return <a href={event.registration} className="text-link">Register <ArrowRight size={15} /></a>;
+  return <Link to="/contact" hash="contact-form" className="text-link">Express Interest <ArrowRight size={15} /></Link>;
+}
 
-export function EventsGrid({ limit = 4 }: { limit?: number }) {
+export function EventsGrid({ limit, exclude }: { limit?: number; exclude?: string | undefined }) {
+  const { events: allEvents } = useCms();
   const [filter, setFilter] = useState('All');
-  const events = eventList.filter(event => filter === 'All' || event.category === filter).slice(0, limit);
+  const events = allEvents.filter(event => event.id !== exclude && (filter === 'All' || event.category === filter)).slice(0, limit);
 
   return <>
     <div className="filter-tabs" role="group" aria-label="Event categories">
-      {['All', 'Roundtables', 'Webinars', 'Networking'].map(category => <Button key={category} size="sm"
+      {['All', ...eventCategories].map(category => <Button key={category} size="sm"
         variant={filter === category ? 'default' : 'ghost'} aria-pressed={filter === category}
         onClick={() => setFilter(category)}>{category}</Button>)}
     </div>
     <div className="event-grid">
-      {events.map(event => <article className="event-card" key={event.title}>
+      {events.map(event => <article className="event-card" key={event.id}>
+        {event.photo && <img src={event.photo} alt="" loading="lazy" />}
         <span className="eyebrow">{event.category}</span>
         <h3>{event.title}</h3>
-        <p>{event.text}</p>
-        <Link to="/contact" hash="contact-form" className="text-link">Express Interest <ArrowRight size={15} /></Link>
+        <p>{event.summary}</p>
+        {(event.date || event.location) && <p>{[event.date, event.location].filter(Boolean).join(' · ')}</p>}
+        <EventLink event={event} />
       </article>)}
     </div>
+    {!events.length && <p>No events are listed in this category.</p>}
   </>;
+}
+
+export function PeopleGrid({ people }: { people: SitePerson[] }) {
+  return <div className="leaders">{people.map(person => <article key={person.id}>
+    {person.photo ? <img className="profile-photo" src={person.photo} alt="" loading="lazy" /> :
+      <span className="avatar-initials" aria-hidden="true">{person.name.split(/\s+/).slice(0, 2).map(word => word[0]).join('')}</span>}
+    <div><h3>{person.name}</h3><p>{[person.role, person.organisation].filter(Boolean).join(' · ')}</p></div>
+  </article>)}</div>;
 }

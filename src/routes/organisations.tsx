@@ -1,3 +1,4 @@
+import { useCms, usePagePhoto } from '@/lib/cms-context';
 import { photos } from '@/lib/photos';
 import { createFileRoute } from '@tanstack/react-router';
 import { Download, Handshake, Users, MessagesSquare, Lightbulb, Network, Megaphone, Target, TrendingUp, BookOpen } from 'lucide-react';
@@ -11,9 +12,12 @@ export const Route = createFileRoute('/organisations')({
 });
 
 function Organisations() {
+  const { branding } = useCms();
+  const hero = usePagePhoto('hero', photos.roundtable, 'Financial professionals in discussion at an IFF gathering');
+  const footer = usePagePhoto('footer', photos.reception, 'Attendees in conversation at an IFF reception');
   return <div className="organisations-page">
     <section className="org-hero">
-      <img className="org-hero-image" src={photos.roundtable} alt="Financial professionals in discussion at an IFF gathering" fetchPriority="high" />
+      <img className="org-hero-image" src={hero.src} alt={hero.alt} fetchPriority="high" />
       <div className="container org-hero-inner">
         <div className="hero-copy">
           <h1>For Organisations</h1>
@@ -55,11 +59,11 @@ function Organisations() {
         { title: 'Back Knowledge-Led Initiatives', text: 'Support platforms designed for learning, insight and professional exchange.', icon: BookOpen },
         { title: 'Build Stronger Relationships', text: 'Create deeper connections across the wider financial ecosystem.', icon: Network },
       ]} />
-      <div className="section-end"><span title="The partnership brochure has not been supplied."><Button size="lg" variant="outline" disabled><Download />Download Partnership Brochure</Button></span></div>
+      {branding.brochure && <div className="section-end"><Button asChild size="lg" variant="outline"><a href={branding.brochure}><Download />Download Partnership Brochure</a></Button></div>}
     </Section>
 
     <section className="section org-final" id="join">
-      <img src={photos.reception} alt="Attendees in conversation at an IFF reception" loading="lazy" />
+      <img src={footer.src} alt={footer.alt} loading="lazy" />
       <div className="container">
         <h2>Create meaningful industry impact.</h2>
         <p>Whether you want to partner, sponsor, collaborate or engage the ecosystem, we can shape an opportunity around what you are trying to achieve.</p>

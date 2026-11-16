@@ -1,6 +1,10 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { query } from './iff-store.server';
 import {
+  authenticateStaff, cmsCollection, cmsSettings, CmsError, findStaffSession, library, mediaLimit,
+  mediaResponse, saveBranding, saveCmsRecord, saveMedia, savePagePhotos, saveStaffAccount, staffAccounts,
+} from './iff-cms.server';
+import {
   inboxKinds, inboxStatuses, inboxUpdateSchema, maxResumeBytes, publicationSchema, submissionSchema,
   type InboxEntry, type InboxUpdate, type Publication,
 } from './submissions';
@@ -91,12 +95,14 @@ function cookie(value: string, request: Request, maxAge: number) {
   return `${sessionCookie}=${value}; HttpOnly; SameSite=Strict; Path=/api/iff/admin; Max-Age=${maxAge}${secure}`;
 }
 
-function authenticated(request: Request, password: string) {
+async function authenticated(request: Request, password: string) {
   const token = request.headers.get('cookie')?.split('; ').find(value => value.startsWith(`${sessionCookie}=`));
   const value = token?.slice(sessionCookie.length + 1) || '';
-  const [expires, nonce, signature] = value.split('.');
-  return Boolean(nonce && signature && Number(expires) > Date.now() &&
-    safeEqual(signature, sign(`${expires}.${nonce}`, password)));
+  const [expires, id, version, nonce, signature] = value.split('.');
+  if (!id || !version || !nonce || !signature || !(Number(expires) > Date.now()) ||
+      !safeEqual(signature, sign(`${expires}.${id}.${version}.${nonce}`, password))) return undefined;
+  if (id === 'owner') return { name: 'Site administrator', role: 'admin' as const };
+  return findStaffSession(id, Number(version));
 }
 
 async function saveSubmission(request: Request) {
@@ -128,13 +134,16 @@ async function login(request: Request, password: string) {
     failedLogins = 0;
   }
   if (failedLogins >= 10) throw new InvalidRequest('Try again in a few minutes.', 429);
-  const data = await readJson(request, 1024);
-  if (typeof data?.password !== 'string' || !safeEqual(sign(data.password, password), sign(password, password))) {
-    failedLogins += 1;
-    throw new InvalidRequest('Incorrect editor password.', 401);
+  const data = await readJson(request, 4096);
+  if (typeof data?.password !== 'string' || data.password.length > 200) throw new InvalidRequest('Enter a password.');
+  failedLogins += 1;
+  const email = typeof data.email === 'string' ? data.email.trim() : '';
+  const user = email ? await authenticateStaff(email, data.password) : undefined;
+  if (email ? !user : !safeEqual(sign(data.password, password), sign(password, password))) {
+    throw new InvalidRequest('Incorrect email or password.', 401);
   }
   failedLogins = 0;
-  const token = `${now + sessionSeconds * 1000}.${randomUUID()}`;
+  const token = `${now + sessionSeconds * 1000}.${user?.id ?? 'owner'}.${user?.session_version ?? 0}.${randomUUID()}`;
   return json({ ok: true }, 200, { 'Set-Cookie': cookie(`${token}.${sign(token, password)}`, request, sessionSeconds) });
 }
 
@@ -143,6 +152,7 @@ async function listInbox(url: URL, exporting: boolean) {
   const kind = url.searchParams.get('kind') || '';
   const status = url.searchParams.get('status') || '';
   const search = url.searchParams.get('q')?.trim() || '';
+  const excludeNewsletter = url.searchParams.get('scope') === 'enquiries';
   if (!Number.isSafeInteger(page) || page < 0 || page > 1_000_000 || search.length > 120 ||
       (kind && !Object.hasOwn(inboxKinds, kind)) || (status && !Object.hasOwn(inboxStatuses, status))) {
     throw new InvalidRequest('Check the inbox filters.');
@@ -154,7 +164,8 @@ async function listInbox(url: URL, exporting: boolean) {
     WHERE ($1 = '' OR kind = $1) AND ($2 = '' OR status = $2)
       AND ($3 = '' OR strpos(lower(concat_ws(' ', fields->>'name', fields->>'email',
         fields->>'organisation', owner, notes)), lower($3)) > 0)
-    ORDER BY received_at DESC, id DESC LIMIT $4 OFFSET $5`, [kind, status, search, limit + 1, page * limit]);
+      AND (NOT $6::boolean OR kind <> 'newsletter')
+    ORDER BY received_at DESC, id DESC LIMIT $4 OFFSET $5`, [kind, status, search, limit + 1, page * limit, excludeNewsletter]);
 
   if (!exporting) return json({ entries: rows.slice(0, limit), hasNext: rows.length > limit });
   if (rows.length > limit) throw new InvalidRequest('Narrow the inbox filters to export up to 5,000 submissions.');
@@ -193,10 +204,40 @@ async function editorApi(request: Request, url: URL, action: string) {
     throw new InvalidRequest('Set an editor password of at least 16 characters on the server.', 503);
   }
   if (request.method === 'POST' && action === 'login') return login(request, password);
-  if (!authenticated(request, password)) throw new InvalidRequest('Sign in to the editor.', 401);
+  const user = await authenticated(request, password);
+  if (!user) throw new InvalidRequest('Sign in to the editor.', 401);
+  if (request.method === 'GET' && action === 'session') return json({ name: user.name, role: user.role });
 
   if (request.method === 'POST' && action === 'logout') {
     return json({ ok: true }, 200, { 'Set-Cookie': cookie('', request, 0) });
+  }
+  if (action === 'site/events' || action === 'site/leadership' || action === 'site/volunteers') {
+    const collection = action.split('/')[1] as 'events' | 'leadership' | 'volunteers';
+    if (request.method === 'GET') return json(await cmsCollection(collection));
+    if (request.method === 'POST') return json(await saveCmsRecord(collection, await readJson(request, 16_384)));
+  }
+  if (request.method === 'GET' && action === 'site/settings') return json(await cmsSettings());
+  if (request.method === 'POST' && action === 'site/branding') {
+    await saveBranding(await readJson(request, 24_576));
+    return json({ ok: true });
+  }
+  if (request.method === 'POST' && action === 'site/pages') {
+    await savePagePhotos(await readJson(request, 8192));
+    return json({ ok: true });
+  }
+  if (request.method === 'GET' && action === 'site/library') return json(await library());
+  if (request.method === 'POST' && action === 'site/library') {
+    const body = await boundedBody(request, mediaLimit + 32_768);
+    const data = await body.formData().catch(() => { throw new InvalidRequest('Choose a file to upload.'); });
+    return json(await saveMedia(data), 201);
+  }
+  if (action === 'site/users') {
+    if (user.role !== 'admin') throw new InvalidRequest('Administrator access is required.', 403);
+    if (request.method === 'GET') return json(await staffAccounts());
+    if (request.method === 'POST') {
+      await saveStaffAccount(await readJson(request, 8192));
+      return json({ ok: true });
+    }
   }
   if (request.method === 'GET' && (action === 'inbox' || action === 'inbox.csv')) {
     return listInbox(url, action === 'inbox.csv');
@@ -247,6 +288,9 @@ export async function handleIffApi(request: Request) {
   const path = url.pathname.slice('/api/iff/'.length);
   try {
     const origin = process.env['IFF_PUBLIC_ORIGIN'] || url.origin;
+    if ((request.method === 'GET' || request.method === 'HEAD') && path.startsWith('media/')) {
+      return await mediaResponse(path.slice('media/'.length), request.method === 'HEAD');
+    }
     if (request.method !== 'GET' && request.headers.get('origin') !== origin) {
       throw new InvalidRequest('Submit this request from the IFF website.', 403);
     }
@@ -258,7 +302,7 @@ export async function handleIffApi(request: Request) {
     if (path.startsWith('admin/')) return await editorApi(request, url, path.slice('admin/'.length));
     throw new InvalidRequest('Page not found.', 404);
   } catch (error) {
-    if (error instanceof InvalidRequest) return json({ error: error.message }, error.status);
+    if (error instanceof InvalidRequest || error instanceof CmsError) return json({ error: error.message }, error.status);
     console.error('IFF request failed', error);
     return json({ error: 'The request could not be saved or loaded. Try again.' }, 500);
   }

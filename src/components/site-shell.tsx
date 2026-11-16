@@ -3,10 +3,12 @@ import { useState, type FormEvent } from 'react';
 import { ArrowRight, Menu, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { navigation } from '@/lib/site';
+import { useCms } from '@/lib/cms-context';
 
 export function Logo({ inverse = false }: { inverse?: boolean }) {
+  const { branding } = useCms();
   return <Link to="/" aria-label="Indian Financial Forum home" className={`logo ${inverse ? 'logo-inverse' : ''}`}>
-    <img src="/favicon.svg" alt="Indian Financial Forum" width={145} height={50} />
+    <img src={branding.logo || '/favicon.svg'} alt="Indian Financial Forum" width={145} height={50} />
   </Link>;
 }
 

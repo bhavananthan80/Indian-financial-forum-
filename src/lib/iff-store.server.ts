@@ -20,6 +20,19 @@ const schema = `
     updated_at TEXT NOT NULL, published_at TEXT
   );
   CREATE INDEX IF NOT EXISTS iff_publications_recent ON iff_publications(status, published_at DESC);
+  CREATE TABLE IF NOT EXISTS iff_cms_records (
+    collection TEXT NOT NULL, id TEXT NOT NULL, data JSONB NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(collection, id)
+  );
+  CREATE TABLE IF NOT EXISTS iff_media (
+    id UUID PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL, filename TEXT NOT NULL,
+    mime TEXT NOT NULL, content BYTEA NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS iff_editor_users (
+    id UUID PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+    role TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE
+  );
+  ALTER TABLE iff_editor_users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0;
 `;
 
 type Query = <Row extends object>(sql: string, values?: unknown[]) => Promise<{ rows: Row[]; affected: number }>;

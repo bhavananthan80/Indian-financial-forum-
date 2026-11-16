@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useLocation,
   HeadContent,
   Scripts,
   type ErrorComponentProps,
@@ -13,6 +14,13 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Header, Footer } from '@/components/site-shell';
+import { CmsContext } from '@/lib/cms-context';
+import { emptyCms } from '@/lib/cms';
+import { loadPublicCms } from '@/lib/cms-public';
+
+function isAdminPath(pathname: string) {
+  return pathname === '/admin' || pathname === '/admin/';
+}
 
 function NotFoundComponent() {
   return (
@@ -100,6 +108,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
   }),
   shellComponent: RootShell,
+  loader: ({ location }) => isAdminPath(location.pathname) ? emptyCms : loadPublicCms(),
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
@@ -121,12 +130,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const cms = Route.useLoaderData();
+  const isAdmin = useLocation({ select: location => isAdminPath(location.pathname) });
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Header />
-      <main><Outlet /></main>
-      <Footer />
+      <CmsContext.Provider value={cms}>
+        {isAdmin ? <Outlet /> : <><Header /><main><Outlet /></main><Footer /></>}
+      </CmsContext.Provider>
     </QueryClientProvider>
   );
 }

@@ -8,7 +8,7 @@ const fieldLabels: Record<string, string> = {
   designation: 'Designation', linkedin: 'LinkedIn', expertise: 'Expertise', experience: 'Speaking experience',
 };
 
-export function AdminInbox({ onError }: { onError: (error: unknown) => void }) {
+export function AdminInbox({ onError, scope }: { onError: (error: unknown) => void; scope: 'enquiries' | 'newsletter' }) {
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('');
   const [status, setStatus] = useState('');
@@ -18,7 +18,7 @@ export function AdminInbox({ onError }: { onError: (error: unknown) => void }) {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
-  const filters = new URLSearchParams({ q: query, kind, status }).toString();
+  const filters = new URLSearchParams({ q: query, kind: scope === 'newsletter' ? 'newsletter' : kind, status, scope }).toString();
 
   useEffect(() => {
     let active = true;
@@ -82,10 +82,10 @@ export function AdminInbox({ onError }: { onError: (error: unknown) => void }) {
   return <section aria-label="Submissions inbox">
     <form className="inbox-filters" onSubmit={applyFilters}>
       <label>Search submissions<input name="query" type="search" maxLength={120} placeholder="Name, email, organisation or notes" /></label>
-      <label>Type<select name="kind" defaultValue="">
+      {scope === 'enquiries' && <label>Type<select name="kind" defaultValue="">
         <option value="">All types</option>
-        {Object.entries(inboxKinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-      </select></label>
+        {Object.entries(inboxKinds).filter(([value]) => value !== 'newsletter').map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>}
       <label>Status<select name="status" defaultValue="">
         <option value="">All statuses</option>
         {Object.entries(inboxStatuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

@@ -1,6 +1,8 @@
 export async function editorRequest(path: string, body?: object) {
   const response = await fetch(`/api/iff/admin/${path}`, body && {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', ...(body instanceof FormData ? { body } : {
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));

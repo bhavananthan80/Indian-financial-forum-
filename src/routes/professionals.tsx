@@ -1,3 +1,4 @@
+import { usePagePhoto } from '@/lib/cms-context';
 import { photos } from '@/lib/photos';
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -23,12 +24,14 @@ const communities = [
 ];
 
 function Professionals() {
+  const hero = usePagePhoto('hero', photos.career, 'Professionals networking at an IFF gathering');
+  const footer = usePagePhoto('footer', photos.leadership, 'A group photograph at an IFF leadership gathering');
   const [selected, setSelected] = useState(0);
   const current = communities[selected] ?? communities[0];
   if (!current) return null;
   return <div className="professionals-page">
     <section className="org-hero">
-      <img className="org-hero-image" src={photos.career} alt="Professionals networking at an IFF gathering" fetchPriority="high" />
+      <img className="org-hero-image" src={hero.src} alt={hero.alt} fetchPriority="high" />
       <div className="container org-hero-inner"><div className="hero-copy">
         <h1>For Professionals</h1>
         <p>Join a thriving network of BFSI professionals through industry-focused communities, exclusive member benefits and opportunities to connect, learn and collaborate.</p>
@@ -69,7 +72,7 @@ function Professionals() {
     </Section>
 
     <section className="section org-final" id="join">
-      <img src={photos.leadership} alt="A group photograph at an IFF leadership gathering" loading="lazy" />
+      <img src={footer.src} alt={footer.alt} loading="lazy" />
       <div className="container"><h2>Be Part of the Conversations Shaping BFSI</h2><p>Join a growing community of professionals committed to learning, collaboration and industry impact.</p>
         <div className="hero-buttons"><Action topic="Membership">Become a Member</Action><Action secondary>Contact Us</Action></div>
       </div>

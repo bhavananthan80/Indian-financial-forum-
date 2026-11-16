@@ -28,7 +28,7 @@ export const publicationSchema = z.object({
   title: z.string().trim().min(1).max(160),
   summary: z.string().trim().min(1).max(350),
   body: z.string().trim().max(40_000),
-  url: webUrl.or(z.literal('')),
+  url: webUrl.or(z.string().regex(/^\/api\/iff\/media\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i)).or(z.literal('')),
   status: z.enum(['draft', 'published']),
 }).superRefine((post, ctx) => {
   if (post.status !== 'published') return;
