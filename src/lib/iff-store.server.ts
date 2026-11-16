@@ -1,0 +1,80 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import pg from 'pg';
+
+const schema = `
+  CREATE TABLE IF NOT EXISTS iff_submissions (
+    id UUID PRIMARY KEY, kind TEXT NOT NULL, received_at TEXT NOT NULL,
+    fields JSONB NOT NULL, attachment_name TEXT, attachment BYTEA
+  );
+  ALTER TABLE iff_submissions ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new';
+  ALTER TABLE iff_submissions ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT '';
+  ALTER TABLE iff_submissions ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+  ALTER TABLE iff_submissions ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX IF NOT EXISTS iff_submissions_recent ON iff_submissions(received_at DESC, id DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS iff_newsletter_email ON iff_submissions((fields->>'email'))
+    WHERE kind = 'newsletter';
+  CREATE TABLE IF NOT EXISTS iff_publications (
+    id UUID PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL,
+    body TEXT NOT NULL, url TEXT NOT NULL, status TEXT NOT NULL,
+    updated_at TEXT NOT NULL, published_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS iff_publications_recent ON iff_publications(status, published_at DESC);
+`;
+
+type Query = <Row extends object>(sql: string, values?: unknown[]) => Promise<{ rows: Row[]; affected: number }>;
+let database: Promise<Query> | undefined;
+
+async function connect(): Promise<Query> {
+  const url = process.env['IFF_DATABASE_URL'];
+  if (!url) {
+    const localPath = process.env['IFF_LOCAL_DB'];
+    if (!localPath && process.env['NODE_ENV'] === 'production') throw new Error('IFF_DATABASE_URL is required.');
+    const { PGlite } = createRequire(import.meta.url)('@electric-sql/pglite') as typeof import('@electric-sql/pglite');
+    const local = new PGlite(localPath || '.iff-data');
+    await local.exec(schema);
+    return async (sql, values) => {
+      const result = await local.query(sql, values);
+      return { rows: result.rows as never[], affected: result.affectedRows ?? 0 };
+    };
+  }
+
+  const caFile = process.env['IFF_DATABASE_CA_FILE'];
+  if (process.env['NODE_ENV'] === 'production' && !caFile) throw new Error('IFF_DATABASE_CA_FILE is required.');
+  const parsed = new URL(url);
+  if (caFile && ['sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'ssl'].some(name => parsed.searchParams.has(name))) {
+    throw new Error('Configure PostgreSQL TLS with IFF_DATABASE_CA_FILE only.');
+  }
+  const pool = new pg.Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 5000,
+    ssl: caFile ? { ca: readFileSync(caFile, 'utf8'), rejectUnauthorized: true } : undefined });
+  pool.on('error', error => console.error('IFF database connection closed', error.message));
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(40677319)');
+      await client.query(schema);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
+  return async (sql, values) => {
+    const result = await pool.query(sql, values);
+    return { rows: result.rows, affected: result.rowCount ?? 0 };
+  };
+}
+
+export const query: Query = async (sql, values) => {
+  database ??= connect().catch(error => {
+    database = undefined;
+    throw error;
+  });
+  return (await database)(sql, values);
+};

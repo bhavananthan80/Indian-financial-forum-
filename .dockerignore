@@ -1,0 +1,11 @@
+.git
+node_modules
+.output
+dist
+dist-ssr
+.tanstack
+.nitro
+.iff-data
+.env*
+*.local
+*.log
